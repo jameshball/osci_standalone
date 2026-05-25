@@ -129,8 +129,7 @@ inline AudioProcessorParameterWithID* findParameterByID (AudioProcessor* process
     @tags{Audio}
 */
 class StandalonePluginHolder    : private AudioIODeviceCallback,
-                                  private Timer,
-                                  private Value::Listener
+                                  private Timer
 {
 public:
     //==============================================================================
@@ -173,9 +172,6 @@ public:
         // Only one StandalonePluginHolder may be created at a time
         jassert (currentInstance == nullptr);
         currentInstance = this;
-
-        shouldMuteInput.addListener (this);
-        shouldMuteInput = !isInterAppAudioConnected();
 
         handleCreatePlugin();
 
@@ -252,12 +248,6 @@ public:
         return (fileSuffix.startsWithChar ('.') ? "*" : "*.") + fileSuffix;
     }
 
-    //==============================================================================
-    Value& getMuteInputValue()                           { return shouldMuteInput; }
-    bool getProcessorHasPotentialFeedbackLoop() const    { return processorHasPotentialFeedbackLoop; }
-    void valueChanged (Value& value) override            { muteInput = (bool) value.getValue(); }
-
-    //==============================================================================
     File getLastFile() const
     {
         File f;
@@ -394,10 +384,6 @@ public:
             auto xml = deviceManager.createStateXml();
 
             settings->setValue ("audioSetup", xml.get());
-
-           #if !(JUCE_IOS || JUCE_ANDROID)
-            settings->setValue ("shouldMuteInput", (bool) shouldMuteInput.getValue());
-           #endif
         }
     }
 
@@ -419,10 +405,6 @@ public:
         if (settings != nullptr)
         {
             savedState = settings->getXmlValue ("audioSetup");
-
-           #if !(JUCE_IOS || JUCE_ANDROID)
-                     shouldMuteInput.setValue (settings->getBoolValue ("shouldMuteInput", true));
-           #endif
         }
 
         const auto xmlContainsDeviceTypeName = [] (const XmlElement& root, const String& deviceTypeName) -> bool
@@ -447,16 +429,6 @@ public:
             return false;
         };
 
-        const auto hasAudioDeviceType = [&] (const String& typeName) -> bool
-        {
-            const auto& types = deviceManager.getAvailableDeviceTypes();
-            for (auto* t : types)
-                if (t != nullptr && t->getTypeName() == typeName)
-                    return true;
-
-            return false;
-        };
-
        #if JUCE_MAC && OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO
         // If a newer macOS saved "Process Audio" as the active device type,
         // discard that state on older macOS versions where process taps are unavailable.
@@ -467,6 +439,16 @@ public:
        #endif
 
        #if JUCE_WINDOWS
+        const auto hasAudioDeviceType = [&] (const String& typeName) -> bool
+        {
+            const auto& types = deviceManager.getAvailableDeviceTypes();
+            for (auto* t : types)
+                if (t != nullptr && t->getTypeName() == typeName)
+                    return true;
+
+            return false;
+        };
+
         // If a saved state references Windows Loopback but this build/runtime
         // doesn't expose the type, discard stale state to avoid failed opens.
         if (savedState != nullptr
@@ -569,17 +551,7 @@ public:
     std::function<void(const juce::String&)> commandLineCallback;
     std::function<bool()> showAudioSettingsOverlay;
 
-    // avoid feedback loop by default
-    bool processorHasPotentialFeedbackLoop = true;
-    std::atomic<bool> muteInput { true };
-    Value shouldMuteInput;
-    AudioBuffer<float> emptyBuffer;
     bool autoOpenMidiDevices;
-
-   #if OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO && (JUCE_MAC || JUCE_WINDOWS)
-    // -1 = never seen a device start; 0 = last was not capture; 1 = last was capture.
-    std::atomic<int> lastDeviceWasCapturePath { -1 };
-   #endif
 
     std::unique_ptr<AudioDeviceManager::AudioDeviceSetup> options;
     Array<MidiDeviceInfo> lastMidiDevices;
@@ -596,8 +568,6 @@ private:
         processor = createPluginFilterOfType (AudioProcessor::wrapperType_Standalone);
         processor->disableNonMainBuses();
         processor->setRateAndBufferSizeDetails (44100, 512);
-
-        processorHasPotentialFeedbackLoop = (getNumInputChannels() > 0 && getNumOutputChannels() > 0);
     }
 
     void handleDeletePlugin()
@@ -743,7 +713,6 @@ private:
                 });
 
                 // Older osci products have an input toggle parameter; this is a no-op here.
-                // The plugin's output mute is handled automatically by audioDeviceAboutToStart.
                 if (auto* param = findParameterByID (owner.processor.get(), "inputEnabled"))
                     param->setValueNotifyingHost (1.0f);
 
@@ -898,12 +867,6 @@ private:
                                            int numSamples,
                                            const AudioIODeviceCallbackContext& context) override
     {
-        if (muteInput)
-        {
-            emptyBuffer.clear();
-            inputChannelData = emptyBuffer.getArrayOfReadPointers();
-        }
-
         player.audioDeviceIOCallbackWithContext (inputChannelData,
                                                  numInputChannels,
                                                  outputChannelData,
@@ -914,47 +877,6 @@ private:
 
     void audioDeviceAboutToStart (AudioIODevice* device) override
     {
-       #if OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO && (JUCE_MAC || JUCE_WINDOWS)
-        const auto typeName = device != nullptr ? device->getTypeName() : String();
-        const bool isCapturePathType = SystemAudioCapture::isCaptureType (typeName);
-
-        if (isCapturePathType)
-        {
-            muteInput.store (false);
-
-            if (MessageManager::getInstance()->isThisTheMessageThread())
-                shouldMuteInput.setValue (false);
-            else
-                MessageManager::callAsync ([v = Value (shouldMuteInput)]() mutable { v.setValue (false); });
-        }
-
-        // Auto-toggle the plugin's output mute (VolumeComponent mute) only on actual
-        // transitions in or out of a system-audio capture path — so we don't stomp
-        // over the user's mute state every time audio restarts (including first launch).
-        const int previousState = lastDeviceWasCapturePath.exchange (isCapturePathType ? 1 : 0);
-        const bool isTransition = (previousState != -1) && ((previousState == 1) != isCapturePathType);
-        if (isTransition)
-        {
-            if (auto* muteParam = findParameterByID (processor.get(), "mute"))
-            {
-                const float targetValue = isCapturePathType ? 1.0f : 0.0f;
-                auto applyMute = [muteParam, targetValue]
-                {
-                    if (muteParam->getValue() != targetValue)
-                        muteParam->setValueNotifyingHost (targetValue);
-                };
-
-                if (MessageManager::getInstance()->isThisTheMessageThread())
-                    applyMute();
-                else
-                    MessageManager::callAsync (std::move (applyMute));
-            }
-        }
-       #endif
-
-        emptyBuffer.setSize (device->getActiveInputChannels().countNumberOfSetBits(), device->getCurrentBufferSizeSamples());
-        emptyBuffer.clear();
-
         player.audioDeviceAboutToStart (device);
         player.setMidiOutput (deviceManager.getDefaultMidiOutput());
     }
@@ -963,7 +885,6 @@ private:
     {
         player.setMidiOutput (nullptr);
         player.audioDeviceStopped();
-        emptyBuffer.setSize (0, 0);
     }
 
     //==============================================================================
@@ -1208,8 +1129,6 @@ public:
 
         pluginHolder->createPlugin();
         updateContent();
-        // startPlaying() will trigger audioDeviceAboutToStart on the new processor, which
-        // applies the correct mute state for the current device type automatically.
         pluginHolder->startPlaying();
     }
 
@@ -1280,18 +1199,14 @@ private:
 
     //==============================================================================
     class MainContentComponent  : public Component,
-                                  private Value::Listener,
-                                  private Button::Listener,
                                   private ComponentListener
     {
     public:
         MainContentComponent (StandaloneFilterWindow& filterWindow)
-            : owner (filterWindow), notification (this),
+            : owner (filterWindow),
               editor (owner.getAudioProcessor()->hasEditor() ? owner.getAudioProcessor()->createEditorIfNeeded()
                                                              : new GenericAudioProcessorEditor (*owner.getAudioProcessor()))
         {
-            inputMutedValue.referTo (owner.pluginHolder->getMuteInputValue());
-
             if (editor != nullptr)
             {
                 editor->addComponentListener (this);
@@ -1299,16 +1214,6 @@ private:
 
                 addAndMakeVisible (editor.get());
             }
-
-            addChildComponent (notification);
-
-            if (owner.pluginHolder->getProcessorHasPotentialFeedbackLoop())
-            {
-                inputMutedValue.addListener (this);
-                shouldShowNotification = inputMutedValue.getValue();
-            }
-
-            inputMutedChanged (shouldShowNotification);
         }
 
         ~MainContentComponent() override
@@ -1346,92 +1251,14 @@ private:
             }();
 
             return nativeFrame.addedTo (owner.getContentComponentBorder())
-                              .addedTo (BorderSize<int> { shouldShowNotification ? NotificationArea::height : 0, 0, 0, 0 });
+                              .addedTo (BorderSize<int> {});
         }
 
     private:
         //==============================================================================
-        class NotificationArea : public Component
-        {
-        public:
-            enum { height = 30 };
-
-            NotificationArea (Button::Listener* settingsButtonListener)
-                : notification ("notification", "Audio input is muted to avoid feedback loop"),
-                 #if JUCE_IOS || JUCE_ANDROID
-                  settingsButton ("Unmute Input")
-                 #else
-                  settingsButton ("Settings...")
-                 #endif
-            {
-                setOpaque (true);
-
-                notification.setColour (Label::textColourId, Colours::black);
-
-                settingsButton.addListener (settingsButtonListener);
-
-                addAndMakeVisible (notification);
-                addAndMakeVisible (settingsButton);
-            }
-
-            void paint (Graphics& g) override
-            {
-                auto r = getLocalBounds();
-
-                g.setColour (Colours::darkgoldenrod);
-                g.fillRect (r.removeFromBottom (1));
-
-                g.setColour (Colours::lightgoldenrodyellow);
-                g.fillRect (r);
-            }
-
-            void resized() override
-            {
-                auto r = getLocalBounds().reduced (5);
-
-                settingsButton.setBounds (r.removeFromRight (70));
-                notification.setBounds (r);
-            }
-        private:
-            Label notification;
-            TextButton settingsButton;
-        };
-
-        //==============================================================================
-        void inputMutedChanged (bool newInputMutedValue)
-        {
-            shouldShowNotification = newInputMutedValue;
-            notification.setVisible (shouldShowNotification);
-
-           #if JUCE_IOS || JUCE_ANDROID
-            handleResized();
-           #else
-            if (editor != nullptr)
-            {
-                const int extraHeight = shouldShowNotification ? NotificationArea::height : 0;
-                const auto rect = getSizeToContainEditor();
-                setSize (rect.getWidth(), rect.getHeight() + extraHeight);
-            }
-           #endif
-        }
-
-        void valueChanged (Value& value) override     { inputMutedChanged (value.getValue()); }
-        void buttonClicked (Button*) override
-        {
-           #if JUCE_IOS || JUCE_ANDROID
-            owner.pluginHolder->getMuteInputValue().setValue (false);
-           #else
-            owner.pluginHolder->showAudioSettingsDialog();
-           #endif
-        }
-
-        //==============================================================================
         void handleResized()
         {
             auto r = getLocalBounds();
-
-            if (shouldShowNotification)
-                notification.setBounds (r.removeFromTop (NotificationArea::height));
 
             if (editor != nullptr)
             {
@@ -1452,8 +1279,7 @@ private:
             {
                 auto rect = getSizeToContainEditor();
 
-                setSize (rect.getWidth(),
-                         rect.getHeight() + (shouldShowNotification ? NotificationArea::height : 0));
+                setSize (rect.getWidth(), rect.getHeight());
             }
         }
 
@@ -1472,10 +1298,7 @@ private:
 
         //==============================================================================
         StandaloneFilterWindow& owner;
-        NotificationArea notification;
         std::unique_ptr<AudioProcessorEditor> editor;
-        Value inputMutedValue;
-        bool shouldShowNotification = false;
         bool preventResizingEditor = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainContentComponent)
