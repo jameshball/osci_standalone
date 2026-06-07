@@ -62,6 +62,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <osci_render_core/settings/osci_SettingsStore.h>
 #include <osci_audio_devices/osci_audio_devices.h>
+#include "../../../Source/modular/tests/PatchArchitectureTestRunner.h"
 
 // You can set this flag in your build if you need to specify a different
 // standalone JUCEApplication class for your app to use. If you don't
@@ -141,6 +142,13 @@ public:
     //==============================================================================
     void initialise (const String& commandLine) override
     {
+        if (::osci::modular::tests::shouldRunPatchArchitectureTests (commandLine))
+        {
+            setApplicationReturnValue (::osci::modular::tests::runPatchArchitectureTests());
+            quit();
+            return;
+        }
+
 #if JUCE_MAC && OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO
         const auto isAutomation = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_AUTOMATION", {}).isNotEmpty();
 
