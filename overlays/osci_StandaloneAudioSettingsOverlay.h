@@ -14,10 +14,8 @@ namespace osci {
 class StandaloneAudioSettingsOverlay final : public ComponentOverlay {
 public:
     StandaloneAudioSettingsOverlay (std::unique_ptr<juce::Component> content,
-                                    juce::String closeButtonSvg,
                                     juce::Point<int> preferredContentSize)
         : ComponentOverlay (std::move (content),
-                            std::move (closeButtonSvg),
                             "Audio/MIDI Settings",
                             preferredContentSize,
                             true) {}
@@ -43,7 +41,7 @@ inline StandaloneAudioSettingsOverlay* findStandaloneAudioSettingsOverlay (juce:
     return nullptr;
 }
 
-inline bool showStandaloneAudioSettingsOverlay (juce::Component& parent, juce::String closeButtonSvg)
+inline bool showStandaloneAudioSettingsOverlay (juce::Component& parent)
 {
     if (auto* existing = findStandaloneAudioSettingsOverlay (parent))
     {
@@ -65,7 +63,6 @@ inline bool showStandaloneAudioSettingsOverlay (juce::Component& parent, juce::S
 
     OverlayComponent::show (parent,
                             std::make_unique<StandaloneAudioSettingsOverlay> (std::move (content),
-                                                                              std::move (closeButtonSvg),
                                                                               preferredContentSize));
     return true;
 }
