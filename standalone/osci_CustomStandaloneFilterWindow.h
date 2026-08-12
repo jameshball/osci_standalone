@@ -182,11 +182,6 @@ public:
             options.reset (new AudioDeviceManager::AudioDeviceSetup (*preferredSetupOptions));
 
         auto audioInputRequired = (inChannels > 0);
-        const auto isJucewrightAutomation = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_AUTOMATION", {}).isNotEmpty();
-        const auto forceAutomationAudioDevice = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_ENABLE_AUDIO_DEVICE", {}).isNotEmpty();
-
-        if (isJucewrightAutomation && ! forceAutomationAudioDevice)
-            audioInputRequired = false;
 
         if (audioInputRequired && RuntimePermissions::isRequired (RuntimePermissions::recordAudio)
             && !RuntimePermissions::isGranted (RuntimePermissions::recordAudio))
@@ -384,9 +379,6 @@ public:
 
     void saveAudioDeviceState()
     {
-        if (SystemStats::getEnvironmentVariable ("JUCEWRIGHT_AUTOMATION", {}).isNotEmpty())
-            return;
-
         if (settings != nullptr)
         {
             auto xml = deviceManager.createStateXml();
@@ -401,11 +393,8 @@ public:
     {
         const auto isJucewrightAutomation = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_AUTOMATION", {}).isNotEmpty();
         const auto forceAutomationAudioDevice = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_ENABLE_AUDIO_DEVICE", {}).isNotEmpty();
-        const auto disableAutomationAudioDevice = isJucewrightAutomation
-            && ! forceAutomationAudioDevice
-            && SystemStats::getEnvironmentVariable ("JUCEWRIGHT_DISABLE_AUDIO_DEVICE", {}).isNotEmpty();
 
-        if (disableAutomationAudioDevice)
+        if (isJucewrightAutomation && ! forceAutomationAudioDevice)
         {
             deviceManager.initialise (0, 0, nullptr, false);
             return;
@@ -417,9 +406,6 @@ public:
         {
             savedState = settings->getXmlValue ("audioSetup");
         }
-
-        if (isJucewrightAutomation && ! forceAutomationAudioDevice)
-            savedState.reset();
 
         const auto xmlContainsDeviceTypeName = [] (const XmlElement& root, const String& deviceTypeName) -> bool
         {
@@ -480,14 +466,7 @@ public:
             outputChannels = 1;
         }
 
-        if (isJucewrightAutomation && ! forceAutomationAudioDevice)
-            outputChannels = jmax (1, outputChannels);
-
-        const auto requestedInputChannels = isJucewrightAutomation && ! forceAutomationAudioDevice
-            ? 0
-            : enableAudioInput ? inputChannels : 0;
-
-        deviceManager.initialise (requestedInputChannels,
+        deviceManager.initialise (enableAudioInput ? inputChannels : 0,
                                   outputChannels,
                                   savedState.get(),
                                   true,
