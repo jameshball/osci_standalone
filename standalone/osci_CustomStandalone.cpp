@@ -142,9 +142,7 @@ public:
     void initialise (const String& commandLine) override
     {
 #if JUCE_MAC && OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO
-        const auto isAutomation = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_AUTOMATION", {}).isNotEmpty();
-
-        if (! isAutomation && ProcessAudioPermissions::isProcessTapAvailable())
+        if (ProcessAudioPermissions::isProcessTapAvailable())
         {
             const auto status = ProcessAudioPermissions::getAudioCapturePermissionStatus();
 
