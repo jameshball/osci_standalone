@@ -405,15 +405,6 @@ public:
                                  const String& preferredDefaultDeviceName,
                                  const AudioDeviceManager::AudioDeviceSetup* preferredSetupOptions)
     {
-        const auto isJucewrightAutomation = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_AUTOMATION", {}).isNotEmpty();
-        const auto forceAutomationAudioDevice = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_ENABLE_AUDIO_DEVICE", {}).isNotEmpty();
-
-        if (isJucewrightAutomation && ! forceAutomationAudioDevice)
-        {
-            deviceManager.initialise (0, 0, nullptr, false);
-            return;
-        }
-
         std::unique_ptr<XmlElement> savedState;
 
         if (settings != nullptr)
