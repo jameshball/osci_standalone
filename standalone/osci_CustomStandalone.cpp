@@ -94,8 +94,11 @@ public:
             
             if (mainWindow->pluginHolder != nullptr && mainWindow->pluginHolder->commandLineCallback != nullptr) {
                 mainWindow->pluginHolder->commandLineCallback(commandLine);
+                return;
             }
         }
+
+        pendingCommandLine = commandLine;
     }
 
     virtual StandaloneFilterWindow* createWindow(const String& commandLine)
@@ -164,6 +167,13 @@ public:
            #endif
 
             mainWindow->setVisible (true);
+
+            if (pendingCommandLine.isNotEmpty() && mainWindow->pluginHolder != nullptr
+                && mainWindow->pluginHolder->commandLineCallback != nullptr) {
+                const auto commandLine = pendingCommandLine;
+                pendingCommandLine.clear();
+                mainWindow->pluginHolder->commandLineCallback(commandLine);
+            }
         }
         else
         {
@@ -206,6 +216,7 @@ protected:
     std::unique_ptr<StandaloneFilterWindow> mainWindow;
 
 private:
+    String pendingCommandLine;
     std::unique_ptr<StandalonePluginHolder> pluginHolder;
 };
 
