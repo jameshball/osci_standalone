@@ -18,7 +18,10 @@ public:
         : ComponentOverlay (std::move (content),
                             "Audio/MIDI Settings",
                             preferredContentSize,
-                            true) {}
+                            true)
+    {
+        setComponentID ("standaloneAudioSettingsOverlay");
+    }
 
 private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StandaloneAudioSettingsOverlay)
@@ -46,7 +49,9 @@ inline bool showStandaloneAudioSettingsOverlay (juce::Component& parent)
     if (auto* existing = findStandaloneAudioSettingsOverlay (parent))
     {
         existing->toFront (true);
-        existing->grabKeyboardFocus();
+        if (existing->isShowing()) {
+            existing->grabKeyboardFocus();
+        }
         return true;
     }
 
