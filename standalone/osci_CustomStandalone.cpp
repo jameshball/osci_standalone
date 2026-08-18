@@ -60,7 +60,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <juce_audio_utils/juce_audio_utils.h>
-#include <osci_render_core/settings/osci_SettingsStore.h>
+#include <osci_settings/osci_settings.h>
 #include <osci_audio_devices/osci_audio_devices.h>
 
 // You can set this flag in your build if you need to specify a different
@@ -85,7 +85,7 @@ public:
 
     const String getApplicationName() override              { return CharPointer_UTF8 (JucePlugin_Name); }
     const String getApplicationVersion() override           { return JucePlugin_VersionString; }
-    bool moreThanOneInstanceAllowed() override              { return true; }
+    bool moreThanOneInstanceAllowed() override              { return OSCI_STANDALONE_SINGLE_INSTANCE == 0; }
     void anotherInstanceStarted (const String& commandLine) override
     {
         if (mainWindow != nullptr)
