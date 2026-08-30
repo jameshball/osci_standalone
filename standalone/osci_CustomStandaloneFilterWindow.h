@@ -47,6 +47,13 @@ namespace juce
 //==============================================================================
 namespace SystemAudioCapture
 {
+    /** Lets a processor defer automatic output muting while playing an introduction. */
+    struct OutputMuteHandler {
+        virtual ~OutputMuteHandler() = default;
+        /** Returns the previous requested state, including a deferred mute. */
+        virtual bool setSystemAudioOutputMuted(bool muted) = 0;
+    };
+
     /** Returns the device-type name used for platform-native system-audio capture
         (macOS process taps / Windows WASAPI loopback), or an empty string if the
         platform has no such device type. */
@@ -118,6 +125,21 @@ inline AudioProcessorParameterWithID* findParameterByID (AudioProcessor* process
     return nullptr;
 }
 
+inline bool setSystemAudioOutputMuted(AudioProcessor* processor, bool muted) {
+    auto* handler = dynamic_cast<SystemAudioCapture::OutputMuteHandler*>(processor);
+    if (handler != nullptr) {
+        return handler->setSystemAudioOutputMuted(muted);
+    } else {
+        auto* parameter = findParameterByID(processor, "mute");
+        if (parameter != nullptr) {
+            const bool previous = parameter->getValue() >= 0.5f;
+            parameter->setValueNotifyingHost(muted ? 1.0f : 0.0f);
+            return previous;
+        }
+    }
+    return false;
+}
+
 //==============================================================================
 /**
     An object that creates and plays a standalone instance of an AudioProcessor.
@@ -136,6 +158,69 @@ public:
     //==============================================================================
     /** Structure used for the number of inputs and outputs. */
     struct PluginInOuts   { short numIns, numOuts; };
+
+    static bool isSosciProduct()
+    {
+        return String (JucePlugin_Name).equalsIgnoreCase ("sosci");
+    }
+
+    bool enableSystemAudioCapture() {
+       #if OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO && (JUCE_MAC || JUCE_WINDOWS)
+        if (!SystemAudioCapture::isAvailable(deviceManager)) {
+            return false;
+        }
+
+        const auto previousType = deviceManager.getCurrentAudioDeviceType();
+        const auto previousSetup = deviceManager.getAudioDeviceSetup();
+        // Mute before opening capture, including when it is already the active type.
+        const auto previousMute = setSystemAudioOutputMuted(processor.get(), true);
+
+        deviceManager.setCurrentAudioDeviceType(SystemAudioCapture::getTypeName(), true);
+
+        auto setup = deviceManager.getAudioDeviceSetup();
+        const auto combined = SystemAudioCapture::makeDeviceName();
+        setup.outputDeviceName = combined;
+        setup.inputDeviceName = combined;
+        setup.useDefaultInputChannels = true;
+        setup.useDefaultOutputChannels = true;
+        setup.sampleRate = 0;
+        const auto error = deviceManager.setAudioDeviceSetup(setup, true);
+        if (error.isEmpty() && deviceManager.getCurrentAudioDevice() != nullptr) {
+            shouldMuteInput.setValue(false);
+            auto* inputParameter = findParameterByID(processor.get(), "inputEnabled");
+            if (inputParameter != nullptr) {
+                inputParameter->setValueNotifyingHost(1.0f);
+            }
+            freshSystemAudioDefaultPending = false;
+            return true;
+        }
+
+        deviceManager.setCurrentAudioDeviceType(previousType, true);
+        deviceManager.setAudioDeviceSetup(previousSetup, true);
+        setSystemAudioOutputMuted(processor.get(), previousMute);
+       #endif
+        return false;
+    }
+
+    bool applyFreshSystemAudioDefault() {
+        if (!freshSystemAudioDefaultPending || !isSosciProduct()) {
+            return false;
+        }
+        // Live microphone fallback must not feed back into the speakers either.
+        setSystemAudioOutputMuted(processor.get(), true);
+        return enableSystemAudioCapture();
+    }
+
+    void resetSosciAudioInputToDefault() {
+        if (!isSosciProduct()) {
+            return;
+        }
+
+        shouldMuteInput.setValue (false);
+        deviceManager.initialise (getNumInputChannels(), getNumOutputChannels(), nullptr, true);
+        freshSystemAudioDefaultPending = true;
+        applyFreshSystemAudioDefault();
+    }
 
     //==============================================================================
     /** Creates an instance of the default plugin.
@@ -199,6 +284,7 @@ public:
     {
         setupAudioDevices (enableAudioInput, preferredDefaultDeviceName, options.get());
         reloadPluginState();
+        applyFreshSystemAudioDefault();
         startPlaying();
 
        if (autoOpenMidiDevices)
@@ -416,6 +502,11 @@ public:
            #endif
         }
 
+        if (savedState == nullptr && isSosciProduct())
+        {
+            shouldMuteInput.setValue (false);
+        }
+
         const auto xmlContainsDeviceTypeName = [] (const XmlElement& root, const String& deviceTypeName) -> bool
         {
             Array<const XmlElement*> toVisit;
@@ -482,6 +573,8 @@ public:
                                   preferredDefaultDeviceName,
                                   preferredSetupOptions);
 
+        freshSystemAudioDefaultPending = savedState == nullptr;
+
         // On first launch (no saved state), enable all detected MIDI inputs
         // so the user doesn't have to manually tick them in the settings panel.
         if (savedState == nullptr)
@@ -509,8 +602,11 @@ public:
         {
             MemoryBlock data;
 
-            if (data.fromBase64Encoding (settings->getValue ("filterState")) && data.getSize() > 0)
+            const bool restored = data.fromBase64Encoding (settings->getValue ("filterState")) && data.getSize() > 0;
+            if (restored)
+            {
                 processor->setStateInformation (data.getData(), (int) data.getSize());
+            }
         }
     }
 
@@ -563,6 +659,7 @@ public:
     // avoid feedback loop by default
     bool processorHasPotentialFeedbackLoop = true;
     std::atomic<bool> muteInput { true };
+    bool freshSystemAudioDefaultPending = false;
     Value shouldMuteInput;
     AudioBuffer<float> emptyBuffer;
     bool autoOpenMidiDevices;
@@ -710,34 +807,8 @@ private:
 #if OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO && (JUCE_MAC || JUCE_WINDOWS)
             enableSystemAudioCaptureButton.setButtonText ("Enable System Audio Capture");
             enableSystemAudioCaptureButton.setLookAndFeel (&deviceSelector.getLookAndFeel());
-            enableSystemAudioCaptureButton.onClick = [this]
-            {
-                const auto typeName = SystemAudioCapture::getTypeName();
-                if (typeName.isEmpty())
-                    return;
-
-                owner.deviceManager.setCurrentAudioDeviceType (typeName, true);
-
-                // Apply our desired combined device name. Deferred via callAsync so it runs
-                // after the CustomAudioDeviceSelectorComponent's internal recovery logic,
-                // which would otherwise reset the output to "<< none >>".
-                MessageManager::callAsync ([this]
-                {
-                    auto setup = owner.deviceManager.getAudioDeviceSetup();
-                    const auto combined = SystemAudioCapture::makeDeviceName();
-                    setup.outputDeviceName = combined;
-                    setup.inputDeviceName = combined;
-                    setup.useDefaultInputChannels = true;
-                    setup.useDefaultOutputChannels = true;
-                    setup.sampleRate = 0; // let the capture device pick its native rate
-                    owner.deviceManager.setAudioDeviceSetup (setup, true);
-                });
-
-                // Older osci products have an input toggle parameter; this is a no-op here.
-                // The plugin's output mute is handled automatically by audioDeviceAboutToStart.
-                if (auto* param = findParameterByID (owner.processor.get(), "inputEnabled"))
-                    param->setValueNotifyingHost (1.0f);
-
+            enableSystemAudioCaptureButton.onClick = [this] {
+                owner.enableSystemAudioCapture();
                 updateSystemAudioCaptureButtonVisibility();
             };
 
@@ -926,19 +997,13 @@ private:
         const bool isTransition = (previousState != -1) && ((previousState == 1) != isCapturePathType);
         if (isTransition)
         {
-            if (auto* muteParam = findParameterByID (processor.get(), "mute"))
-            {
-                const float targetValue = isCapturePathType ? 1.0f : 0.0f;
-                auto applyMute = [muteParam, targetValue]
-                {
-                    if (muteParam->getValue() != targetValue)
-                        muteParam->setValueNotifyingHost (targetValue);
-                };
-
-                if (MessageManager::getInstance()->isThisTheMessageThread())
-                    applyMute();
-                else
-                    MessageManager::callAsync (std::move (applyMute));
+            auto applyMute = [processor = processor.get(), isCapturePathType] {
+                setSystemAudioOutputMuted(processor, isCapturePathType);
+            };
+            if (MessageManager::getInstance()->isThisTheMessageThread()) {
+                applyMute();
+            } else {
+                MessageManager::callAsync(std::move(applyMute));
             }
         }
        #endif
@@ -967,16 +1032,23 @@ private:
 
        #if OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO && (JUCE_MAC || JUCE_WINDOWS)
         // Ensure default device types (CoreAudio/WASAPI/ASIO/etc.) are created first.
+        // Types added after that initial scan must populate their device lists before
+        // saved device names are validated by reloadAudioDeviceState().
         deviceManager.getAvailableDeviceTypes();
        #endif
 
        #if JUCE_MAC && OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO
-        if (ProcessAudioPermissions::isProcessTapAvailable())
-            deviceManager.addAudioDeviceType (std::make_unique<ProcessAudioDeviceType>());
+        if (ProcessAudioPermissions::isProcessTapAvailable()) {
+            auto type = std::make_unique<ProcessAudioDeviceType>();
+            type->scanForDevices();
+            deviceManager.addAudioDeviceType(std::move(type));
+        }
        #endif
 
        #if JUCE_WINDOWS && OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO
-        deviceManager.addAudioDeviceType (std::make_unique<WindowsLoopbackAudioDeviceType>());
+        auto type = std::make_unique<WindowsLoopbackAudioDeviceType>();
+        type->scanForDevices();
+        deviceManager.addAudioDeviceType(std::move(type));
        #endif
 
         reloadAudioDeviceState (enableAudioInput, preferredDefaultDeviceName, preferredSetupOptions);
@@ -1198,6 +1270,7 @@ public:
             props->removeValue ("filterState");
 
         pluginHolder->createPlugin();
+        pluginHolder->resetSosciAudioInputToDefault();
         updateContent();
         // startPlaying() will trigger audioDeviceAboutToStart on the new processor, which
         // applies the correct mute state for the current device type automatically.
