@@ -172,11 +172,6 @@ public:
 
         if (mainWindow != nullptr)
         {
-            if (mainWindow->pluginHolder != nullptr)
-            {
-                mainWindow->pluginHolder->applyFreshSystemAudioDefault();
-            }
-
            #if JUCE_STANDALONE_FILTER_WINDOW_USE_KIOSK_MODE
             Desktop::getInstance().setKioskModeComponent (mainWindow.get(), false);
            #endif

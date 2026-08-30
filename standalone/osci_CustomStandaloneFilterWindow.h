@@ -602,11 +602,8 @@ public:
         {
             MemoryBlock data;
 
-            const bool restored = data.fromBase64Encoding (settings->getValue ("filterState")) && data.getSize() > 0;
-            if (restored)
-            {
+            if (data.fromBase64Encoding (settings->getValue ("filterState")) && data.getSize() > 0)
                 processor->setStateInformation (data.getData(), (int) data.getSize());
-            }
         }
     }
 
