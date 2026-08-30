@@ -47,13 +47,6 @@ namespace juce
 //==============================================================================
 namespace SystemAudioCapture
 {
-    /** Lets a processor defer automatic output muting while playing an introduction. */
-    struct OutputMuteHandler {
-        virtual ~OutputMuteHandler() = default;
-        /** Returns the previous requested state, including a deferred mute. */
-        virtual bool setSystemAudioOutputMuted(bool muted) = 0;
-    };
-
     /** Returns the device-type name used for platform-native system-audio capture
         (macOS process taps / Windows WASAPI loopback), or an empty string if the
         platform has no such device type. */
@@ -126,16 +119,11 @@ inline AudioProcessorParameterWithID* findParameterByID (AudioProcessor* process
 }
 
 inline bool setSystemAudioOutputMuted(AudioProcessor* processor, bool muted) {
-    auto* handler = dynamic_cast<SystemAudioCapture::OutputMuteHandler*>(processor);
-    if (handler != nullptr) {
-        return handler->setSystemAudioOutputMuted(muted);
-    } else {
-        auto* parameter = findParameterByID(processor, "mute");
-        if (parameter != nullptr) {
-            const bool previous = parameter->getValue() >= 0.5f;
-            parameter->setValueNotifyingHost(muted ? 1.0f : 0.0f);
-            return previous;
-        }
+    auto* parameter = findParameterByID(processor, "mute");
+    if (parameter != nullptr) {
+        const bool previous = parameter->getValue() >= 0.5f;
+        parameter->setValueNotifyingHost(muted ? 1.0f : 0.0f);
+        return previous;
     }
     return false;
 }
