@@ -71,6 +71,10 @@
 // #include <juce_audio_plugin_client/Standalone/juce_StandaloneFilterWindow.h>
 #include "osci_CustomStandaloneFilterWindow.h"
 
+#if JUCE_MAC
+#include "osci_DockReopen_mac.mm"
+#endif
+
 namespace juce
 {
 
@@ -153,7 +157,13 @@ public:
             {
                 // Best-effort: request once at app start so the audio settings UI
                 // doesn't need to host permission-request buttons.
-                ProcessAudioPermissions::requestAudioCapturePermission ([] (bool) {});
+                ProcessAudioPermissions::requestAudioCapturePermission ([this] (bool granted)
+                {
+                    if (granted && mainWindow != nullptr && mainWindow->pluginHolder != nullptr)
+                    {
+                        mainWindow->pluginHolder->applyFreshSystemAudioDefault();
+                    }
+                });
             }
         }
 #endif
@@ -167,6 +177,10 @@ public:
            #endif
 
             mainWindow->setVisible (true);
+
+           #if JUCE_MAC
+            dockReopenHandler = std::make_unique<osci::DockReopenHandler>(*mainWindow);
+           #endif
 
             if (pendingCommandLine.isNotEmpty() && mainWindow->pluginHolder != nullptr
                 && mainWindow->pluginHolder->commandLineCallback != nullptr) {
@@ -183,6 +197,9 @@ public:
 
     void shutdown() override
     {
+       #if JUCE_MAC
+        dockReopenHandler.reset();
+       #endif
         pluginHolder = nullptr;
         mainWindow = nullptr;
         appProperties.saveIfNeeded();
@@ -216,6 +233,9 @@ protected:
     std::unique_ptr<StandaloneFilterWindow> mainWindow;
 
 private:
+   #if JUCE_MAC
+    std::unique_ptr<osci::DockReopenHandler> dockReopenHandler;
+   #endif
     String pendingCommandLine;
     std::unique_ptr<StandalonePluginHolder> pluginHolder;
 };
