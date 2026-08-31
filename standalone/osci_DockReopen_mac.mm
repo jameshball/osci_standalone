@@ -1,7 +1,10 @@
 #include <AppKit/AppKit.h>
 
-// Handle the Dock's reopen event without changing JUCE's application delegate or
-// taking focus away from a popout when the user activates it directly.
+// Clicking the Dock icon can otherwise bring forward only the visualiser popout,
+// leaving the main standalone window hidden, minimised or behind other windows.
+// Handle the reopen event to restore and focus the main window instead. Unlike
+// handling every app activation, this leaves direct clicks on the popout alone
+// and does not require replacing JUCE's application delegate.
 @interface OsciStandaloneDockReopenTarget : NSObject {
 @public
     juce::Component::SafePointer<juce::ResizableWindow> mainWindow;
