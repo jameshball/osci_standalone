@@ -1310,6 +1310,11 @@ private:
         constexpr auto resizeAutomatically = true;
        #endif
 
+        if (isFullScreen()) {
+            // A replacement editor must fit the fullscreen window before auto-sizing resumes.
+            content->setBounds(getContentComponentBorder().subtractedFrom(getLocalBounds()));
+        }
+
         setContentOwned (content, resizeAutomatically);
     }
 
