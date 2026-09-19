@@ -169,7 +169,11 @@ public:
         const auto combined = SystemAudioCapture::makeDeviceName();
         setup.outputDeviceName = combined;
         setup.inputDeviceName = combined;
-        setup.useDefaultInputChannels = true;
+        // Enabling system capture needs stereo even if the previous device had
+        // no input (or mono input), which changes the manager's default count.
+        setup.useDefaultInputChannels = false;
+        setup.inputChannels.clear();
+        setup.inputChannels.setRange(0, 2, true);
         setup.useDefaultOutputChannels = true;
         setup.sampleRate = 0;
         const auto error = deviceManager.setAudioDeviceSetup(setup, true);
