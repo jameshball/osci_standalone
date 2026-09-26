@@ -152,6 +152,93 @@ public:
         return String (JucePlugin_Name).equalsIgnoreCase ("sosci");
     }
 
+    // Message-thread transaction: the player is detached before changing bus
+    // layouts or restarting hardware. Unavailable channel counts are rejected
+    // without touching the running configuration.
+    Result configureOutputChannels(int requestedChannels) {
+        if (!MessageManager::getInstance()->isThisTheMessageThread()) {
+            return Result::fail("Output channels must be configured on the message thread.");
+        }
+        auto* device = deviceManager.getCurrentAudioDevice();
+        if (processor == nullptr || device == nullptr) {
+            return Result::fail("No audio processor or output device is available.");
+        }
+        if (requestedChannels <= 0 || device->getOutputChannelNames().size() < requestedChannels) {
+            return Result::fail("The current audio device does not expose " + String(requestedChannels) + " output channels.");
+        }
+        const auto previousLayout = processor->getBusesLayout();
+        const auto previousSetup = deviceManager.getAudioDeviceSetup();
+        const auto previousOutputs = device->getActiveOutputChannels();
+        auto layout = previousLayout;
+        if (layout.outputBuses.isEmpty()) {
+            return Result::fail("The processor has no output bus.");
+        }
+        for (auto& input : layout.inputBuses) {
+            input = AudioChannelSet::disabled();
+        }
+        for (auto& output : layout.outputBuses) {
+            output = AudioChannelSet::disabled();
+        }
+        layout.outputBuses.set(0, requestedChannels == 2 ? AudioChannelSet::stereo()
+                                                       : AudioChannelSet::discreteChannels(requestedChannels));
+        if (!processor->checkBusesLayoutSupported(layout)) {
+            return Result::fail("The processor does not support the requested output layout.");
+        }
+        auto setup = previousSetup;
+        setup.useDefaultOutputChannels = false;
+        // Preserve the user's physical channel mapping when it already fits.
+        setup.outputChannels = device->getActiveOutputChannels();
+        if (setup.outputChannels.countNumberOfSetBits() != requestedChannels) {
+            setup.outputChannels.clear();
+            setup.outputChannels.setRange(0, requestedChannels, true);
+        }
+        if (previousLayout == layout && previousOutputs.countNumberOfSetBits() == requestedChannels) {
+            return Result::ok();
+        }
+        stopPlaying();
+        const auto rollback = [&](String reason) {
+            stopPlaying();
+            const auto restoredLayout = processor->setBusesLayout(previousLayout);
+            const auto restoreError = deviceManager.setAudioDeviceSetup(previousSetup, true);
+            startPlaying();
+            const auto* restoredDevice = deviceManager.getCurrentAudioDevice();
+            const auto restored = restoredDevice != nullptr
+                && restoredDevice->getActiveOutputChannels() == previousOutputs
+                && processor->getBusesLayout() == previousLayout;
+            if (!restoredLayout || restoreError.isNotEmpty() || !restored) {
+                reason += " Restoring the previous audio configuration also failed";
+                if (restoreError.isNotEmpty()) {
+                    reason += ": " + restoreError;
+                }
+                reason += ". Check Audio Settings.";
+            }
+            return Result::fail(reason);
+        };
+        if (!processor->setBusesLayout(layout)) {
+            return rollback("The processor could not apply the requested output layout.");
+        }
+        const auto error = deviceManager.setAudioDeviceSetup(setup, true);
+        if (error.isNotEmpty()) {
+            return rollback("The audio device could not enable the requested outputs: " + error);
+        }
+        const auto matches = [&] {
+            const auto* currentDevice = deviceManager.getCurrentAudioDevice();
+            return currentDevice != nullptr
+                && currentDevice->getActiveOutputChannels().countNumberOfSetBits() == requestedChannels
+                && processor->getTotalNumOutputChannels() == requestedChannels
+                && processor->getTotalNumInputChannels() == 0;
+        };
+        if (!matches()) {
+            return rollback("The audio device or processor did not activate the requested channel count.");
+        }
+        startPlaying();
+        // AudioProcessorPlayer may negotiate a layout when it reattaches.
+        if (!matches()) {
+            return rollback("Playback could not retain the requested output layout.");
+        }
+        return Result::ok();
+    }
+
     bool enableSystemAudioCapture() {
        #if OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO && (JUCE_MAC || JUCE_WINDOWS)
         if (!SystemAudioCapture::isAvailable(deviceManager)) {
@@ -1090,7 +1177,7 @@ inline std::unique_ptr<Component> StandalonePluginHolder::createAudioSettingsCom
 
     auto* outputBus = processor->getBus (false, 0);
     if (outputBus != nullptr) {
-        maxNumOutputs = jmax (0, outputBus->getDefaultLayout().size());
+        maxNumOutputs = jmax (maxNumOutputs, outputBus->getDefaultLayout().size(), outputBus->getCurrentLayout().size());
     }
 
     maxNumInputs = jmax (maxNumInputs, OSCI_STANDALONE_AUDIO_SETTINGS_MIN_CHANNELS);
