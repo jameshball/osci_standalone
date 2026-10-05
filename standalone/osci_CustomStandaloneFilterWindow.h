@@ -154,8 +154,9 @@ public:
 
     // Message-thread transaction: the player is detached before changing bus
     // layouts or restarting hardware. Unavailable channel counts are rejected
-    // without touching the running configuration.
-    Result configureOutputChannels(int requestedChannels) {
+    // without touching the running configuration. Every input bus is
+    // disabled: this is for products that only produce audio.
+    Result configureOutputOnlyChannels(int requestedChannels) {
         if (!MessageManager::getInstance()->isThisTheMessageThread()) {
             return Result::fail("Output channels must be configured on the message thread.");
         }
