@@ -149,7 +149,11 @@ public:
     void initialise (const String& commandLine) override
     {
 #if JUCE_MAC && OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO
-        if (ProcessAudioPermissions::isProcessTapAvailable())
+        // Automated sessions never prompt: the request brings the app to the
+        // front, taking focus from whoever is working while tests run.
+        const auto automated = SystemStats::getEnvironmentVariable ("JUCEWRIGHT_AUTOMATION", {}).isNotEmpty();
+
+        if (ProcessAudioPermissions::isProcessTapAvailable() && ! automated)
         {
             const auto status = ProcessAudioPermissions::getAudioCapturePermissionStatus();
 
