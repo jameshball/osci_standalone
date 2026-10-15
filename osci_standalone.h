@@ -26,7 +26,7 @@
   license:           GPLv3
   minimumCppStandard: 20
 
-  dependencies:      juce_core, juce_audio_devices, juce_audio_plugin_client, juce_audio_processors, juce_audio_utils, juce_data_structures, juce_events, juce_gui_basics, juce_gui_extra, osci_audio_devices, osci_gui, osci_render_core
+  dependencies:      juce_core, juce_audio_devices, juce_audio_plugin_client, juce_audio_processors, juce_audio_utils, juce_data_structures, juce_events, juce_gui_basics, juce_gui_extra, osci_audio_devices, osci_gui, osci_settings
 
  END_JUCE_MODULE_DECLARATION
 
@@ -43,7 +43,8 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <osci_audio_devices/osci_audio_devices.h>
 #include <osci_gui/osci_gui.h>
-#include <osci_render_core/osci_render_core.h>
+#include <osci_settings/osci_settings.h>
 
 #include "standalone/osci_CustomStandaloneFilterWindow.h"
 #include "overlays/osci_StandaloneAudioSettingsOverlay.h"
+#include "components/osci_PluginEditorBase.h"

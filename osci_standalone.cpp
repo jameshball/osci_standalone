@@ -10,4 +10,4 @@
 #include "osci_standalone.h"
 
 #include "standalone/osci_CustomStandalone.cpp"
-
+#include "components/osci_PluginEditorBase.cpp"

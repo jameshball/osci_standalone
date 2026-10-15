@@ -252,7 +252,7 @@ public:
         currentInstance = this;
 
         shouldMuteInput.addListener (this);
-        shouldMuteInput = !isInterAppAudioConnected();
+        shouldMuteInput = OSCI_STANDALONE_MUTE_INPUT_BY_DEFAULT != 0 && !isInterAppAudioConnected();
 
         handleCreatePlugin();
 
@@ -490,7 +490,10 @@ public:
             savedState = settings->getXmlValue ("audioSetup");
 
            #if !(JUCE_IOS || JUCE_ANDROID)
-                     shouldMuteInput.setValue (settings->getBoolValue ("shouldMuteInput", true));
+            if (OSCI_STANDALONE_MUTE_INPUT_BY_DEFAULT != 0)
+                shouldMuteInput.setValue (settings->getBoolValue ("shouldMuteInput", true));
+            else
+                shouldMuteInput.setValue (false);
            #endif
         }
 
@@ -795,6 +798,7 @@ private:
 
 #if OSCI_AUDIO_DEVICES_ENABLE_SYSTEM_AUDIO && (JUCE_MAC || JUCE_WINDOWS)
             enableSystemAudioCaptureButton.setButtonText ("Enable System Audio Capture");
+            enableSystemAudioCaptureButton.setComponentID ("enableSystemAudioCapture");
             enableSystemAudioCaptureButton.setLookAndFeel (&deviceSelector.getLookAndFeel());
             enableSystemAudioCaptureButton.onClick = [this] {
                 owner.enableSystemAudioCapture();
@@ -1122,7 +1126,7 @@ public:
     StandaloneFilterWindow (const String& title,
                             Colour backgroundColour,
                             std::unique_ptr<StandalonePluginHolder> pluginHolderIn)
-        : DocumentWindow (title, backgroundColour, DocumentWindow::minimiseButton | DocumentWindow::closeButton),
+        : DocumentWindow (title, backgroundColour, DocumentWindow::allButtons),
           pluginHolder (std::move (pluginHolderIn)),
           optionsButton ("Options")
     {
@@ -1132,7 +1136,7 @@ public:
         setTitleBarHeight (0);
        #else
         setUsingNativeTitleBar(true);
-        setTitleBarButtonsRequired (DocumentWindow::minimiseButton | DocumentWindow::closeButton, false);
+        setTitleBarButtonsRequired (DocumentWindow::allButtons, false);
 
         Component::addAndMakeVisible (optionsButton);
         optionsButton.addListener (this);
