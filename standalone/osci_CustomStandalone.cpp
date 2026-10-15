@@ -181,6 +181,7 @@ public:
            #endif
 
             mainWindow->setVisible (true);
+            mainWindow->keepTitleBarOnScreen();
 
            #if JUCE_MAC
             dockReopenHandler = std::make_unique<osci::DockReopenHandler>(*mainWindow);

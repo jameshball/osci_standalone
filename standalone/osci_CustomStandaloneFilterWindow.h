@@ -1317,6 +1317,30 @@ public:
     {
     }
 
+    // Once shown: moves and if need be shrinks the window so its native title
+    // bar is on screen too. The saved position is the content's, so a window
+    // saved against the top of the screen would otherwise reopen with its
+    // title bar above it, out of reach.
+    void keepTitleBarOnScreen()
+    {
+        auto* peer = getPeer();
+        if (peer == nullptr)
+            return;
+
+        const auto frame = peer->getFrameSizeIfPresent();
+        auto* display = Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds());
+        if (! frame || display == nullptr)
+            return;
+
+        const auto area = (*frame).subtractedFrom (display->userArea);
+        auto bounds = getBounds();
+        bounds.setSize (jmin (bounds.getWidth(), area.getWidth()), jmin (bounds.getHeight(), area.getHeight()));
+        bounds = bounds.constrainedWithin (area);
+
+        if (bounds != getBounds())
+            setBounds (bounds);
+    }
+
     ~StandaloneFilterWindow() override
     {
        #if (!JUCE_IOS) && (!JUCE_ANDROID)
