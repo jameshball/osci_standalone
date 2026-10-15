@@ -1363,6 +1363,9 @@ public:
     /** Deletes and re-creates the plugin, resetting it to its default state. */
     void resetToDefaultState()
     {
+        // A new project keeps the window as it is; only its contents start over.
+        auto* oldContent = getContentComponent();
+        const auto keptSize = oldContent != nullptr ? oldContent->getBounds() : Rectangle<int>();
         pluginHolder->stopPlaying();
         clearContentComponent();
         pluginHolder->deletePlugin();
@@ -1373,6 +1376,9 @@ public:
         pluginHolder->createPlugin();
         pluginHolder->resetSosciAudioInputToDefault();
         updateContent();
+        auto* content = getContentComponent();
+        if (content != nullptr && ! keptSize.isEmpty() && isResizable())
+            content->setSize (keptSize.getWidth(), keptSize.getHeight());
         // startPlaying() will trigger audioDeviceAboutToStart on the new processor, which
         // applies the correct mute state for the current device type automatically.
         pluginHolder->startPlaying();
