@@ -1090,7 +1090,7 @@ inline std::unique_ptr<Component> StandalonePluginHolder::createAudioSettingsCom
 
     auto* outputBus = processor->getBus (false, 0);
     if (outputBus != nullptr) {
-        maxNumOutputs = jmax (0, outputBus->getDefaultLayout().size());
+        maxNumOutputs = jmax (maxNumOutputs, outputBus->getDefaultLayout().size(), outputBus->getCurrentLayout().size());
     }
 
     maxNumInputs = jmax (maxNumInputs, OSCI_STANDALONE_AUDIO_SETTINGS_MIN_CHANNELS);
@@ -1229,6 +1229,30 @@ public:
     {
     }
 
+    // Once shown: moves and if need be shrinks the window so its native title
+    // bar is on screen too. The saved position is the content's, so a window
+    // saved against the top of the screen would otherwise reopen with its
+    // title bar above it, out of reach.
+    void keepTitleBarOnScreen()
+    {
+        auto* peer = getPeer();
+        if (peer == nullptr)
+            return;
+
+        const auto frame = peer->getFrameSizeIfPresent();
+        auto* display = Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds());
+        if (! frame || display == nullptr)
+            return;
+
+        const auto area = (*frame).subtractedFrom (display->userArea);
+        auto bounds = getBounds();
+        bounds.setSize (jmin (bounds.getWidth(), area.getWidth()), jmin (bounds.getHeight(), area.getHeight()));
+        bounds = bounds.constrainedWithin (area);
+
+        if (bounds != getBounds())
+            setBounds (bounds);
+    }
+
     ~StandaloneFilterWindow() override
     {
        #if (!JUCE_IOS) && (!JUCE_ANDROID)
@@ -1251,6 +1275,9 @@ public:
     /** Deletes and re-creates the plugin, resetting it to its default state. */
     void resetToDefaultState()
     {
+        // A new project keeps the window as it is; only its contents start over.
+        auto* oldContent = getContentComponent();
+        const auto keptSize = oldContent != nullptr ? oldContent->getBounds() : Rectangle<int>();
         pluginHolder->stopPlaying();
         clearContentComponent();
         pluginHolder->deletePlugin();
@@ -1261,6 +1288,9 @@ public:
         pluginHolder->createPlugin();
         pluginHolder->resetSosciAudioInputToDefault();
         updateContent();
+        auto* content = getContentComponent();
+        if (content != nullptr && ! keptSize.isEmpty() && isResizable())
+            content->setSize (keptSize.getWidth(), keptSize.getHeight());
         // startPlaying() will trigger audioDeviceAboutToStart on the new processor, which
         // applies the correct mute state for the current device type automatically.
         pluginHolder->startPlaying();
